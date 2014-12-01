@@ -46,9 +46,12 @@ CH_U_BOOT_ENVS=${ROOT_PATH}${UBOOT_ENVS}
 BOOTFS_FILE=${FLASHER}/edison-image-edison.hddimg
 ROOTFS_FILE=${FLASHER}/edison-image-edison.ext4
 
-# TODO: shore up the ROOTFS size with the U-Boot partition settings
+# for edbian, rootfs steals from updatefs in the partition layout.  Edit
+# ROOTFS_SIZE= below to a size of 512 to 1240.
 BOOTFS_SIZE=8 # in MB
-ROOTFS_SIZE=1240 # in MB
+ROOTFS_SIZE=1024 # in MB
+UPDATEFS_SIZE=$(( 1280 - ROOTFS_SIZE )) 
+
 TEMP_MNTPT=${BASE}/mnt
 
 # Needed for the build: U-Boot source, kernel source, Edison Yocto build tree
@@ -58,7 +61,7 @@ https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.17.tar.bz2 \
 ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 
 # Packages to install on top of minbase
-TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client"
+TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget"
 
 # Packages needed for building.  TODO: make toolchain-less build
 TARGET_BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper"
@@ -209,11 +212,6 @@ function do_debootstrap() {
 	# setup before chroot
 	echo "edbian.local" > ${ROOT_PATH}/etc/hostname &&
 	echo "127.0.0.1	localhost edbian edbian.local" > ${ROOT_PATH}/etc/hosts &&
-	echo "/dev/disk/by-partlabel/rootfs	/	ext4 errors=remount-ro,	0	1" > ${ROOT_PATH}/etc/fstab &&
-	echo "#/dev/disk/by-partlabel/home	/home	ext4 defaults	0	2" >> ${ROOT_PATH}/etc/fstab &&
-	echo "#/dev/disk/by-partlabel/boot	/boot	vfat errors=remount-ro,noauto	0	2" >> ${ROOT_PATH}/etc/fstab &&
-	echo "#/dev/disk/by-partlabel/update	/update	vfat errors=remount-ro,noauto	0	2" >> ${ROOT_PATH}/etc/fstab &&
-	mkdir ${ROOT_PATH}/update &&
 	echo -e "ttyMFD0\nttyMFD1\nttyMFD2" >> ${ROOT_PATH}/etc/securetty &&
 	sed -i -e "s/root:\*/root:/g" ${ROOT_PATH}/etc/shadow &&
 	echo -e "/dev/disk/by-partlabel/u-boot-env0 0x0000 0x10000 0x10000\n/dev/disk/by-partlabel/u-boot-env1 0x0000 0x10000 0x10000" > ${ROOT_PATH}/etc/fw_env.config
@@ -228,6 +226,12 @@ function ch_do_debootstrap_post() {
 	echo "en_US.UTF-8" >> /etc/default/locale &&
 	locale-gen en_US.UTF-8 &&
 	localepurge &&
+	# systemd optional mounts
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/fstab ${ROOT_PATH}/etc/fstab &&
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount /lib/systemd/system &&
+	ln -sf /lib/systemd/system/media-sdcard.mount /etc/systemd/system/default.target.wants/media-sdcard.mount &&
+	ln -sf /lib/systemd/system/factory.mount /etc/systemd/system/default.target.wants/factory.mount &&
+	# systemd first-install setup
 	FIRST_INSTALL_PATH=${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/first-install/files &&
 	install -m 0644 ${FIRST_INSTALL_PATH}/first-install.target /lib/systemd/system &&
 	install -m 0644 ${FIRST_INSTALL_PATH}/first-install.service /lib/systemd/system &&
@@ -440,8 +444,8 @@ function ch_do_u-boot-envs_build() {
 	# NB - remove if the systemd watchdog is working
 #	sed -i -e "s/loglevel=4/loglevel=8 intel_scu_watchdog_evo.disable_kernel_watchdog=1/g" edison.env
 	sed -i -e "s/loglevel=4/loglevel=8/g" edison.env
-	sed -i -e "s/rootfs,size=512MiB/rootfs,size=1248MiB/g" edison.env
-	sed -i -e "s/update,size=768MiB/update,size=32MiB/g" edison.env
+	sed -i -e "s/rootfs,size=512MiB/rootfs,size=${ROOTFS_SIZE}MiB/g" edison.env
+	sed -i -e "s/update,size=768MiB/update,size=${UPDATEFS_SIZE}MiB/g" edison.env
 	for TARG_ENV in target_env/*; do
 		TARG_NAME_BASE=`basename $TARG_ENV | cut -d "." -f 1`
 		TARG_FILE="${UBOOT_ENVS}/edison-${TARG_NAME_BASE}.bin"
