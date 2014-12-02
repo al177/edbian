@@ -227,10 +227,12 @@ function ch_do_debootstrap_post() {
 	locale-gen en_US.UTF-8 &&
 	localepurge &&
 	# systemd optional mounts
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/fstab ${ROOT_PATH}/etc/fstab &&
+	# note: not sure if this is the right place for the .wants, reenable
+	# once it's figured out
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/fstab /etc/fstab &&
 	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount /lib/systemd/system &&
-	ln -sf /lib/systemd/system/media-sdcard.mount /etc/systemd/system/default.target.wants/media-sdcard.mount &&
-	ln -sf /lib/systemd/system/factory.mount /etc/systemd/system/default.target.wants/factory.mount &&
+#	ln -sf /lib/systemd/system/media-sdcard.mount /etc/systemd/system/default.target.wants/media-sdcard.mount &&
+#	ln -sf /lib/systemd/system/factory.mount /etc/systemd/system/default.target.wants/factory.mount &&
 	# systemd first-install setup
 	FIRST_INSTALL_PATH=${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/first-install/files &&
 	install -m 0644 ${FIRST_INSTALL_PATH}/first-install.target /lib/systemd/system &&
