@@ -61,7 +61,7 @@ https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.17.tar.bz2 \
 ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 
 # Packages to install on top of minbase
-TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget"
+TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget"
 
 # Packages needed for building.  TODO: make toolchain-less build
 TARGET_BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper"
@@ -240,6 +240,7 @@ function ch_do_debootstrap_post() {
 	install -m 0755 ${FIRST_INSTALL_PATH}/first-install.sh /sbin &&
 	install -d /etc/systemd/system/first-install.target.wants &&
 	ln -sf ${FIRST_INSTALL_PATH}/first-install.service /etc/systemd/system/first-install.target.wants/first-install.service &&
+	sed -i -e "s/^[ \t]*ssid=.*/\tssid=\"EDISON-\`echo \${wlan0_addr} | cut -d ':' -f 5-6 | tr ':' '-'\`\"/g" /sbin/first-install.sh &&
 	sed -i -e "s/mkfs.ext4 -m0/mkfs.ext4 -m0 -F/g" /sbin/first-install.sh &&
 	sed -i "/ExecStart/d" /lib/systemd/system/first-install.service &&
 	echo "ExecStart=/bin/sh /sbin/first-install.sh systemd-service" >> /lib/systemd/system/first-install.service &&
@@ -248,13 +249,20 @@ function ch_do_debootstrap_post() {
 	sed -i "/\/root/d" /sbin/first-install.sh &&
 	# Debian builds host keys for sshd, skip
 	sed -i -e "s/sshd_init\$/true/g" /sbin/first-install.sh &&
-	# Not sure about hostapd address setup... skip for now
-	sed -i -e "s/setup_ap_ssid_and_passphrase\$/true/g" /sbin/first-install.sh &&
 	systemctl enable serial-getty@ttyMFD2.service &&
 	systemctl enable serial-getty@ttyGS0.service &&
 	systemctl disable getty@tty1.service &&
 	echo "g_multi" >> /etc/modules &&
-	echo "options g_multi file=/dev/mmcblk0p9" > /etc/modprobe.d/g_multi.conf
+	echo "options g_multi file=/dev/mmcblk0p9" > /etc/modprobe.d/g_multi.conf &&
+	# set up hostapd
+	# note: Debian Jessie uses init.d for hostapd, and sources
+	# /etc/defaults/hostapd, which by default disables hostapd
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.conf-sane /etc/hostapd/hostapd.conf &&
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.conf /etc/hostapd/ &&
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.service /lib/systemd/system &&
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.service /lib/systemd/system &&
+	rm -f /etc/init.d/hostapd /etc/network/if-pre-up.d/hostapd /etc/network/if-pre-down.d/hostapd &&	
+	systemctl disable udhcpd.service
 	task_mark_complete $FUNCNAME
 }
 
@@ -548,9 +556,6 @@ function do_make_bootfs() {
 }
 
 function do_prune_rootfs() {
-	if [ $DEBUG -ne 0 ]; then
-		return 0
-	fi
 	if task_start $FUNCNAME; then
 		return 0
 	fi
@@ -584,12 +589,13 @@ function cleanup_build_files() {
 	rm -rf ${ROOT_PATH}
 	echo "Removing intermediate files"
 	rmdir ${TEMP_MNTPT}
+	rm -rf ${FLASHER}
 	rm -f mkimage
 }
 
 function cleanup_build_products() {
 	echo "Removing output files"
-	rm -rf ${FLASHER}
+	rm -f edbian.zip
 }
 
 function cleanup_checkpoints() {
@@ -609,10 +615,9 @@ function do_post_cleanup() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	cleanup_build_files
 	zip -r -9 ${OUTPUT_ZIP} toFlash
 	chmod 777 edbian.zip
-	cleanup_build_products
+	cleanup_build_files
 	task_mark_complete $FUNCNAME
 }
 
@@ -640,7 +645,6 @@ if grep -q "clean" <<<"$1"; then
 	exit 0
 fi
 
-#TBD
 if grep -q "debug" <<<"$1"; then
 	DEBUG=1
 fi
