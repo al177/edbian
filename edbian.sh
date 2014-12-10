@@ -26,16 +26,28 @@ OUTPUT_ZIP=edbian.zip
 
 MAKEOPTS="-j3"
 
-ARCH=i386
 DIST=jessie
+ARCH=i386
+
+# default root password
+ROOTPWD="edison"
 
 # A local apt-catcher server is recommended for development to keep from
 # downloading all the packages every time debootstrap is run.  On Ubuntu
-# and Debian, "apt-get install apt-catcher" should be all that's needed.  If
-# you're sure that you want to pull directly from the network, swap the
-# commenting on the next two lines.
-#DPKG_SERVER=http://http.debian.net/debian/
-DPKG_SERVER=http://localhost:3142/http.debian.net/debian/
+# and Debian, "apt-get install apt-catcher" should be all that's needed.  The
+# next line tries using apt-cache at the defaults Debian installs for a local
+# instance, but can be changed for a remote server or alternate port.  Comment
+# the next line out if you don't want to use apt-catcher.
+APT_CATCHER="http://localhost:3142"
+
+# dpkg server to pull from.  This default should be OK, or change to your own
+DPKG_SERVER=http://http.debian.net/debian/
+
+if [ -n "${APT_CATCHER}" ]; then
+	DPKG_SERVER="${APT_CATCHER}/`sed -e "s/https\?:\/\///g" <<<${DPKG_SERVER}`"
+fi
+
+echo $DPKG_SERVER
 
 CH_PKG_PATH=${ROOT_PATH}/usr/src
 MKIMAGE=/usr/src/u-boot-*/tools/mkimage
@@ -60,11 +72,21 @@ http://downloadmirror.intel.com/24389/eng/edison-src-rel1-maint-rel1-ww42-14.tgz
 https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.17.tar.bz2 \
 ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 
+# for connman - currently unused
+#https://github.com/pfl/connman-deb/archive/master.tar.gz \
+#https://www.kernel.org/pub/linux/network/connman/connman-1.26.tar.gz"
+
 # Packages to install on top of minbase
-TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget"
+TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate"
+
+# for connman:
+#openconnect,openvpn,vpnc,dh-systemd
 
 # Packages needed for building.  TODO: make toolchain-less build
 TARGET_BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper"
+
+# for connman:
+# libglib2.0-dev,libdbus-1-dev,libgnutls28-dev,iptables-dev,libreadline-gplv2-dev"
 
 # Check that these are available on the build host
 HOST_PKGS_REQUIRED="dosfstools zip"
@@ -101,6 +123,29 @@ cat > $PATCH_KERN_HSU_FILE <<'HeREPaTCH1'
  			writel(0x05DC, phsu + UART_MUL * 4);  /* for 19.2M */
  	} else
 HeREPaTCH1
+fi
+
+WIFI_CONFIG_SKELETON=/usr/src/wlan0
+if is_in_chroot; then
+cat > ${WIFI_CONFIG_SKELETON} <<'HeREPaTCH2'
+## comment out to enable automatically loading this config
+#auto wlan0
+
+## assuming DHCP, replace with inet static and address/netmask/gateway entries
+## if a fixed IP is needed 
+iface wlan0 inet dhcp
+
+## for an open WiFi network:
+## uncomment this section and fill out
+#wireless-essid SSID_GOES_HERE
+#wireless-mode managed
+
+###TODO: this is naive, fix it!
+## for a WiFi network with WPA security:
+## uncomment this section and fill out
+#wpa-ssid SSID_GOES_HERE
+#wpa-psk PASSWORD_GOES_HERE
+HeREPaTCH2
 fi
 
 # call with $FUNCNAME, returns 0 if already run
@@ -155,6 +200,17 @@ function do_check_prereqs() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi	
+	if [ -n "${APT_CATCHER}" ]; then
+		wget -q -p /tmp --no-check-certificate ${APT_CATCHER}
+		if [ $? -eq 4 ]; then
+			echo "Can't reach apt-catcher server at ${APT_CATCHER}."
+			echo "If you don't want to use apt-catcher to cache Debian repo packages,"
+			echo "comment out the APT_CATCHER= line near the top of this script."
+			false
+			task_mark_complete $FUNCNAME
+			return 1
+		fi
+	fi
 	dpkg-query -l ${HOST_PKGS_REQUIRED}
 	task_mark_complete $FUNCNAME 	
 }
@@ -167,7 +223,7 @@ function do_download_stuff() {
 	MISSING=0
 	mkdir -p $DL_PATH
 	for FILE in $FILES_TO_GET; do
-		wget -nc -P $DL_PATH $FILE
+		wget --no-check-certificate -nc -P $DL_PATH $FILE
 		if [ $? -ne 0 ]; then
 			MISSING=$(( MISSING + 1 ))
 		fi
@@ -233,6 +289,39 @@ function ch_do_debootstrap_post() {
 	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount /lib/systemd/system &&
 #	ln -sf /lib/systemd/system/media-sdcard.mount /etc/systemd/system/default.target.wants/media-sdcard.mount &&
 #	ln -sf /lib/systemd/system/factory.mount /etc/systemd/system/default.target.wants/factory.mount &&
+	# enable the terminals we use
+	systemctl enable serial-getty@ttyMFD2.service &&
+	systemctl enable serial-getty@ttyGS0.service &&
+	systemctl disable getty@tty1.service &&
+	# enable the USB multifunction gadget at boot time
+	echo "g_multi" >> /etc/modules &&
+	echo "options g_multi file=/dev/mmcblk0p9" > /etc/modprobe.d/g_multi.conf &&
+	# set up hostapd
+	# note: Debian Jessie uses init.d for hostapd, and sources
+	# /etc/defaults/hostapd, which by default disables hostapd
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.conf-sane /etc/hostapd/hostapd.conf &&
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.conf /etc/hostapd/ &&
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.service /lib/systemd/system &&
+	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.service /lib/systemd/system &&
+	rm -f /etc/init.d/hostapd /etc/network/if-pre-up.d/hostapd /etc/network/if-pre-down.d/hostapd &&	
+	systemctl disable udhcpd.service &&
+	# remove apt-catcher from sources.list if it exists
+	sed -i -e "s/localhost:3142\///g" /etc/apt/sources.list &&
+	# copy skeleton wifi config
+	cp ${WIFI_CONFIG_SKELETON} /etc/network/interfaces.d/ &&
+	# set up root password
+	chpasswd <<<"root:${ROOTPWD}" &&
+	# enable ssh root login via password
+	##TODO: find a safer solution...
+	sed -i -e "s/PermitRootLogin without-password/PermitRootLogin yes/g" /etc/ssh/sshd_config
+	task_mark_complete $FUNCNAME
+}
+
+# set up the first boot initialization script
+function ch_setup_first_install() {
+	if task_start $FUNCNAME; then
+		return 0
+	fi
 	# systemd first-install setup
 	FIRST_INSTALL_PATH=${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/first-install/files &&
 	install -m 0644 ${FIRST_INSTALL_PATH}/first-install.target /lib/systemd/system &&
@@ -248,13 +337,15 @@ function ch_do_debootstrap_post() {
 	# don't do the /home/root copy
 	sed -i "/\/root/d" /sbin/first-install.sh &&
 	# Debian builds host keys for sshd, skip
-	sed -i -e "s/sshd_init\$/true/g" /sbin/first-install.sh &&
-	systemctl enable serial-getty@ttyMFD2.service &&
-	systemctl enable serial-getty@ttyGS0.service &&
-	systemctl disable getty@tty1.service &&
-	echo "g_multi" >> /etc/modules &&
-	echo "options g_multi file=/dev/mmcblk0p9" > /etc/modprobe.d/g_multi.conf &&
-	# set up hostapd
+	sed -i -e "s/sshd_init\$/true/g" /sbin/first-install.sh
+	task_mark_complete $FUNCNAME
+}
+
+# set up hostapd access point service
+function ch_setup_hostapd() {
+	if task_start $FUNCNAME; then
+		return 0
+	fi
 	# note: Debian Jessie uses init.d for hostapd, and sources
 	# /etc/defaults/hostapd, which by default disables hostapd
 	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.conf-sane /etc/hostapd/hostapd.conf &&
@@ -654,6 +745,8 @@ if is_in_chroot; then
 	BASE=/usr/src
 	rm /usr/src/fail
 	ch_do_debootstrap_post
+	ch_setup_first_install
+	ch_setup_hostapd
 	ch_do_kernel
 	ch_do_kernel_install
 	ch_do_bcm_wifi
