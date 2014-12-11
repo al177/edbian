@@ -411,6 +411,23 @@ function ch_do_bcm_bt_fw_install() {
 	popd
 }
 
+# build and set up power button handler
+function ch_build_install_pwr_button_handler() {
+	if task_start $FUNCNAME; then
+		return 0
+	fi
+	pushd /usr/src/edison-src/device-software/meta-edison-distro/recipes-support/pwr-button-handler/files
+	sed -i -e "s/\"\/usr\/bin\/configure_edison.*\"/\"\/bin\/systemctl start hostapd.service\"/g" pwr-button-handler.c &&
+	gcc -O2 -DNDEBUG -o pwr_button_handler pwr-button-handler.c &&
+	strip pwr_button_handler &&
+	sed -i -e "s/default.target/multi-user.target/g" pwr-button-handler.service &&
+	install -m 0755 pwr_button_handler /usr/bin &&
+        install -m 644 pwr-button-handler.service /lib/systemd/system &&
+	systemctl enable pwr-button-handler.service
+	task_mark_complete $FUNCNAME
+	popd
+}
+
 function do_pkginst() {
 	if task_start $FUNCNAME; then
 		return 0
@@ -747,6 +764,7 @@ if is_in_chroot; then
 	ch_do_debootstrap_post
 	ch_setup_first_install
 	ch_setup_hostapd
+	ch_build_install_pwr_button_handler
 	ch_do_kernel
 	ch_do_kernel_install
 	ch_do_bcm_wifi
