@@ -283,12 +283,11 @@ function ch_do_debootstrap_post() {
 	locale-gen en_US.UTF-8 &&
 	localepurge &&
 	# systemd optional mounts
-	# note: not sure if this is the right place for the .wants, reenable
-	# once it's figured out
 	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/fstab /etc/fstab &&
+	sed -i -e "s/default.target/local-fs.target/g" ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount &&
 	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount /lib/systemd/system &&
-#	ln -sf /lib/systemd/system/media-sdcard.mount /etc/systemd/system/default.target.wants/media-sdcard.mount &&
-#	ln -sf /lib/systemd/system/factory.mount /etc/systemd/system/default.target.wants/factory.mount &&
+	systemctl enable factory.mount &&
+	systemctl enable media-sdcard.mount &&
 	# enable the terminals we use
 	systemctl enable serial-getty@ttyMFD2.service &&
 	systemctl enable serial-getty@ttyGS0.service &&
@@ -296,19 +295,14 @@ function ch_do_debootstrap_post() {
 	# enable the USB multifunction gadget at boot time
 	echo "g_multi" >> /etc/modules &&
 	echo "options g_multi file=/dev/mmcblk0p9" > /etc/modprobe.d/g_multi.conf &&
-	# set up hostapd
-	# note: Debian Jessie uses init.d for hostapd, and sources
-	# /etc/defaults/hostapd, which by default disables hostapd
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.conf-sane /etc/hostapd/hostapd.conf &&
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.conf /etc/hostapd/ &&
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.service /lib/systemd/system &&
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.service /lib/systemd/system &&
-	rm -f /etc/init.d/hostapd /etc/network/if-pre-up.d/hostapd /etc/network/if-pre-down.d/hostapd &&	
-	systemctl disable udhcpd.service &&
 	# remove apt-catcher from sources.list if it exists
 	sed -i -e "s/localhost:3142\///g" /etc/apt/sources.list &&
 	# copy skeleton wifi config
 	cp ${WIFI_CONFIG_SKELETON} /etc/network/interfaces.d/ &&
+	# enable USB gadget network device
+	sed -i -e "s/-@BASE_BINDIR@/\/bin/g" ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/otg/files/network-gadget-init.service &&
+	install -m 0644  ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/otg/files/network-gadget-init.service /lib/systemd/system &&
+	systemctl enable network-gadget-init.service &&
 	# set up root password
 	chpasswd <<<"root:${ROOTPWD}" &&
 	# enable ssh root login via password
@@ -355,6 +349,23 @@ function ch_setup_hostapd() {
 	rm -f /etc/init.d/hostapd /etc/network/if-pre-up.d/hostapd /etc/network/if-pre-down.d/hostapd &&	
 	systemctl disable udhcpd.service
 	task_mark_complete $FUNCNAME
+}
+
+# build and set up power button handler
+function ch_build_install_pwr_button_handler() {
+	if task_start $FUNCNAME; then
+		return 0
+	fi
+	pushd /usr/src/edison-src/device-software/meta-edison-distro/recipes-support/pwr-button-handler/files
+	sed -i -e "s/\"\/usr\/bin\/configure_edison.*\"/\"\/bin\/systemctl start hostapd.service\"/g" pwr-button-handler.c &&
+	gcc -O2 -DNDEBUG -o pwr_button_handler pwr-button-handler.c &&
+	strip pwr_button_handler &&
+	sed -i -e "s/default.target/multi-user.target/g" pwr-button-handler.service &&
+	install -m 0755 pwr_button_handler /usr/bin &&
+        install -m 644 pwr-button-handler.service /lib/systemd/system &&
+	systemctl enable pwr-button-handler.service
+	task_mark_complete $FUNCNAME
+	popd
 }
 
 # note: sources are installed into DKMS cache, so the unpacked dir
@@ -407,23 +418,6 @@ function ch_do_bcm_bt_fw_install() {
         install -m 0755 BCM43341B0_002.001.014.0122.0166.hcd /etc/firmware/bcm43341.hcd &&
         install -v -d  /usr/sbin/ &&
         install -m 0755 brcm_patchram_plus /usr/sbin/
-	task_mark_complete $FUNCNAME
-	popd
-}
-
-# build and set up power button handler
-function ch_build_install_pwr_button_handler() {
-	if task_start $FUNCNAME; then
-		return 0
-	fi
-	pushd /usr/src/edison-src/device-software/meta-edison-distro/recipes-support/pwr-button-handler/files
-	sed -i -e "s/\"\/usr\/bin\/configure_edison.*\"/\"\/bin\/systemctl start hostapd.service\"/g" pwr-button-handler.c &&
-	gcc -O2 -DNDEBUG -o pwr_button_handler pwr-button-handler.c &&
-	strip pwr_button_handler &&
-	sed -i -e "s/default.target/multi-user.target/g" pwr-button-handler.service &&
-	install -m 0755 pwr_button_handler /usr/bin &&
-        install -m 644 pwr-button-handler.service /lib/systemd/system &&
-	systemctl enable pwr-button-handler.service
 	task_mark_complete $FUNCNAME
 	popd
 }
