@@ -17,17 +17,15 @@
 #along with this program; if not, write to the Free Software
 #Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-BASE=$PWD
-DL_PATH=${BASE}/dl
-ROOT_PATH=${BASE}/debroot
-FLASHER=${BASE}/toFlash
-THIS_SCRIPT=`basename $0`
+# Output .zip file
 OUTPUT_ZIP=edbian.zip
 
+# Increase or decrease -j3 to use more or fewer threads when building the
+# kernel, modules, and U-Boot
 MAKEOPTS="-j3"
 
+# Chooses Debian Jessie.  Sid may work, but is untested.
 DIST=jessie
-ARCH=i386
 
 # default root password
 ROOTPWD="edison"
@@ -43,11 +41,20 @@ APT_CATCHER="http://localhost:3142"
 # dpkg server to pull from.  This default should be OK, or change to your own
 DPKG_SERVER=http://http.debian.net/debian/
 
+
+
+# Nothing to edit below here
+
+ARCH=i386
+BASE=$PWD
+DL_PATH=${BASE}/dl
+ROOT_PATH=${BASE}/debroot
+FLASHER=${BASE}/toFlash
+THIS_SCRIPT=`basename $0`
+
 if [ -n "${APT_CATCHER}" ]; then
 	DPKG_SERVER="${APT_CATCHER}/`sed -e "s/https\?:\/\///g" <<<${DPKG_SERVER}`"
 fi
-
-echo $DPKG_SERVER
 
 CH_PKG_PATH=${ROOT_PATH}/usr/src
 MKIMAGE=/usr/src/u-boot-*/tools/mkimage
