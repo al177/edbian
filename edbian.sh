@@ -79,21 +79,11 @@ http://downloadmirror.intel.com/24389/eng/edison-src-rel1-maint-rel1-ww42-14.tgz
 https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.17.tar.bz2 \
 ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 
-# for connman - currently unused
-#https://github.com/pfl/connman-deb/archive/master.tar.gz \
-#https://www.kernel.org/pub/linux/network/connman/connman-1.26.tar.gz"
-
 # Packages to install on top of minbase
 TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate, wicd-curses"
 
-# for connman:
-#openconnect,openvpn,vpnc,dh-systemd
-
 # Packages needed for building.  TODO: make toolchain-less build
 TARGET_BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper"
-
-# for connman:
-# libglib2.0-dev,libdbus-1-dev,libgnutls28-dev,iptables-dev,libreadline-gplv2-dev"
 
 # Check that these are available on the build host
 HOST_PKGS_REQUIRED="dosfstools zip"
