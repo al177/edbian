@@ -84,7 +84,7 @@ ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 #https://www.kernel.org/pub/linux/network/connman/connman-1.26.tar.gz"
 
 # Packages to install on top of minbase
-TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate"
+TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate, wicd-curses"
 
 # for connman:
 #openconnect,openvpn,vpnc,dh-systemd
@@ -557,14 +557,14 @@ function ch_do_u-boot-envs_build() {
 	fi
 	mkdir -p ${UBOOT_ENVS}
 	pushd /usr/src/edison-src/device-software/meta-edison-distro/recipes-bsp/u-boot/files
-	sed -i -e "s/earlyprintk=ttyMFD2,keep/earlyprintk=hsu2/g" edison.env
-	sed -i -e "s/console=ttyMFD2/console=ttyMFD2,115200n8/g" edison.env
+	sed -i -e "s/earlyprintk=ttyMFD2,keep/earlyprintk=hsu2/g" edison.env &&
+	sed -i -e "s/console=ttyMFD2/console=ttyMFD2,115200n8/g" edison.env &&
 	# hack, find a better place for this later
 	# NB - remove if the systemd watchdog is working
-#	sed -i -e "s/loglevel=4/loglevel=8 intel_scu_watchdog_evo.disable_kernel_watchdog=1/g" edison.env
-	sed -i -e "s/loglevel=4/loglevel=8/g" edison.env
-	sed -i -e "s/rootfs,size=512MiB/rootfs,size=${ROOTFS_SIZE}MiB/g" edison.env
-	sed -i -e "s/update,size=768MiB/update,size=${UPDATEFS_SIZE}MiB/g" edison.env
+#	sed -i -e "s/loglevel=4/loglevel=8 intel_scu_watchdog_evo.disable_kernel_watchdog=1/g" edison.env &&
+#	sed -i -e "s/loglevel=4/loglevel=8/g" edison.env &&
+	sed -i -e "s/rootfs,size=512MiB/rootfs,size=${ROOTFS_SIZE}MiB/g" edison.env &&
+	sed -i -e "s/update,size=768MiB/update,size=${UPDATEFS_SIZE}MiB/g" edison.env &&
 	for TARG_ENV in target_env/*; do
 		TARG_NAME_BASE=`basename $TARG_ENV | cut -d "." -f 1`
 		TARG_FILE="${UBOOT_ENVS}/edison-${TARG_NAME_BASE}.bin"
