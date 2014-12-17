@@ -118,7 +118,7 @@ like "clean" but deletes dl/
 	- [X] Initial root password setup
 	- [ ] OTA install image support (not sure if practical)
 	- [ ] OSIP U-Boot image for worst-case recovery
-	- [ ] connman for easier network setup (maybe?)
+	- [X] wicd and wicd-curses for easy WiFi setup
 - [ ] Package libraries and other bits needed for Edison specific development (low priority for now)
 	- [ ] libmraa
 	- [ ] SDK integration components
@@ -126,7 +126,7 @@ like "clean" but deletes dl/
 		- [ ] Bonjour / mdns
 		- [ ] nodejs
 		- [ ] xdk-daemon
-	- [ ] iotkit-* tools (agent, comm)
+	- [ ] iotkit tools (agent, comm)
 	- [ ] upm
 - [ ] Tighten up the install size
 	- [ ] Make currently unpackaged components into deb packages (firmwares, power button tool, wifi driver)
