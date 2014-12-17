@@ -102,7 +102,6 @@ like "clean" but deletes dl/
 	- [X] Better comments
 	- [X] Split up tasks
 	- [ ] Fix unclear paths
-	- [ ] Minimize time spent in root
 	- [ ] Isolate build products on the build host and chroot in separate directory
 	- [ ] Make rootless if possible, or minimal root requirement (use fakeroot?) during build
 - [ ] Distro improvements

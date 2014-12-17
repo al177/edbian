@@ -41,14 +41,13 @@ APT_CATCHER="http://localhost:3142"
 # dpkg server to pull from.  This default should be OK, or change to your own
 DPKG_SERVER=http://http.debian.net/debian/
 
-
-
 # Nothing to edit below here
 
 ARCH=i386
 BASE=$PWD
 DL_PATH=${BASE}/dl
-ROOT_PATH=${BASE}/debroot
+TARGET_ROOT_PATH=${BASE}/debroot_target
+BUILD_ROOT_PATH=${BASE}/debroot_build
 FLASHER=${BASE}/toFlash
 THIS_SCRIPT=`basename $0`
 
@@ -56,11 +55,13 @@ if [ -n "${APT_CATCHER}" ]; then
 	DPKG_SERVER="${APT_CATCHER}/`sed -e "s/https\?:\/\///g" <<<${DPKG_SERVER}`"
 fi
 
-CH_PKG_PATH=${ROOT_PATH}/usr/src
-MKIMAGE=/usr/src/u-boot-*/tools/mkimage
-MKENVIMAGE=/usr/src/u-boot-*/tools/mkenvimage
-UBOOT_ENVS=/usr/src/u-boot-envs
-CH_U_BOOT_ENVS=${ROOT_PATH}${UBOOT_ENVS}
+CH_BUILD_PATH=/usr/src/build
+MKIMAGE=${BASE}/mkimage
+MKENVIMAGE=${CH_BUILD_PATH}/u-boot-*/tools/mkenvimage
+UBOOT_ENVS=${CH_BUILD_PATH}/u-boot-envs
+CH_U_BOOT_ENVS=${TARGET_ROOT_PATH}${UBOOT_ENVS}
+
+DEBOOTSTRAP_TARBALL=${DL_PATH}/debootstrap.tgz
 
 BOOTFS_FILE=${FLASHER}/edison-image-edison.hddimg
 ROOTFS_FILE=${FLASHER}/edison-image-edison.ext4
@@ -79,21 +80,11 @@ http://downloadmirror.intel.com/24389/eng/edison-src-rel1-maint-rel1-ww42-14.tgz
 https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.17.tar.bz2 \
 ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 
-# for connman - currently unused
-#https://github.com/pfl/connman-deb/archive/master.tar.gz \
-#https://www.kernel.org/pub/linux/network/connman/connman-1.26.tar.gz"
-
 # Packages to install on top of minbase
 TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate"
 
-# for connman:
-#openconnect,openvpn,vpnc,dh-systemd
-
 # Packages needed for building.  TODO: make toolchain-less build
 TARGET_BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper"
-
-# for connman:
-# libglib2.0-dev,libdbus-1-dev,libgnutls28-dev,iptables-dev,libreadline-gplv2-dev"
 
 # Check that these are available on the build host
 HOST_PKGS_REQUIRED="dosfstools zip"
@@ -101,13 +92,17 @@ HOST_PKGS_REQUIRED="dosfstools zip"
 DEBUG=0
 FAIL=0
 
-function is_in_chroot() {
-	[ "`dirname $0`" == "/usr/src" ]
+function is_in_target_chroot() {
+	[ -e ${CH_BUILD_PATH}/target ]
+}
+
+function is_in_build_chroot() {
+	[ -e ${CH_BUILD_PATH}/builder ]
 }
 
 # Patch to fix early printk in the Edison Yocto kernel patch
-PATCH_KERN_HSU_FILE=/usr/src/edison_early_printk_hsu.patch
-if is_in_chroot; then 
+PATCH_KERN_HSU_FILE=${CH_BUILD_PATH}/edison_early_printk_hsu.patch
+if is_in_target_chroot; then 
 cat > $PATCH_KERN_HSU_FILE <<'HeREPaTCH1'
 --- linux-3.10.17/arch/x86/platform/intel-mid/early_printk_intel_mid.c	2014-11-22 23:05:46.062552675 -0600
 +++ linux-new/arch/x86/platform/intel-mid/early_printk_intel_mid.c	2014-11-30 17:16:57.515386274 -0600
@@ -132,8 +127,8 @@ cat > $PATCH_KERN_HSU_FILE <<'HeREPaTCH1'
 HeREPaTCH1
 fi
 
-WIFI_CONFIG_SKELETON=/usr/src/wlan0
-if is_in_chroot; then
+WIFI_CONFIG_SKELETON=${CH_BUILD_PATH}/wlan0
+if is_in_target_chroot; then
 cat > ${WIFI_CONFIG_SKELETON} <<'HeREPaTCH2'
 ## comment out to enable automatically loading this config
 #auto wlan0
@@ -157,7 +152,7 @@ fi
 
 # call with $FUNCNAME, returns 0 if already run
 function task_start() {
-	if [ -e ${BASE}/checkpoint_$1 ]; then
+	if [ -e ${CHECKPOINT}/checkpoint_$1 ]; then
 		echo "---$1 skip - already done"
 		return 0
 	fi
@@ -173,7 +168,7 @@ function task_start() {
 function task_mark_complete() {
 	if [ $? -eq 0 ]; then
 		echo "---$1 complete"
-		touch ${BASE}/checkpoint_$1
+		touch ${CHECKPOINT}/checkpoint_$1
 	else
 		echo "---$1 failed"
 		FAIL=1
@@ -184,23 +179,20 @@ function task_mark_complete() {
 function do_chroot_tasks() {
 	if task_start $FUNCNAME; then
 		return 0
-	fi	
-	cp $0 ${ROOT_PATH}/usr/src &&
-	mount -t proc proc ${ROOT_PATH}/proc &&
-	mount -t sysfs sysfs ${ROOT_PATH}/sys
+	fi
+	THIS_ROOT_PATH=$1
+	mkdir -p ${THIS_ROOT_PATH}/${CH_BUILD_PATH}
+	cp $0 ${THIS_ROOT_PATH}/${CH_BUILD_PATH}
 	if [ $? -ne 0 ]; then
-		umount ${ROOT_PATH}/proc
-		umount ${ROOT_PATH}/sys
 		false
 		task_mark_complete $FUNCNAME
 		return 1
 	fi
 
-	setarch i686 chroot ${ROOT_PATH} /bin/bash /usr/src/$THIS_SCRIPT
-	[ ! -e ${CH_PKG_PATH}/fail ]
+	setarch i686 chroot ${THIS_ROOT_PATH} /bin/bash ${CH_BUILD_PATH}/${THIS_SCRIPT}
+	[ ! -e ${THIS_ROOT_PATH}/${CH_BUILD_PATH}/fail ]
 	task_mark_complete $FUNCNAME
-	umount ${ROOT_PATH}/proc
-	umount ${ROOT_PATH}/sys
+	rm ${THIS_ROOT_PATH}/${CH_BUILD_PATH}/${THIS_SCRIPT}
 }
 
 function do_check_prereqs() {
@@ -239,50 +231,86 @@ function do_download_stuff() {
 	task_mark_complete $FUNCNAME
 }
 
+# do_unpack_stuff <path_to_debroot>
 function do_unpack_stuff() {
 	if task_start $FUNCNAME; then
 		return 0
-	fi	
-	if ! grep -q debroot <<<"${CH_PKG_PATH}"; then
+	fi
+	
+	THIS_ROOT_PATH=$1	
+
+	if ! grep -q debroot <<<"${THIS_ROOT_PATH}"; then
 		echo "Internal path error, bailing!"
 		exit 255 
 	fi
-	rm -rf ${CH_PKG_PATH}/*
-	tar -xjf ${DL_PATH}/linux-*bz2 -C ${CH_PKG_PATH} &&
-	tar -xzf ${DL_PATH}/edison-src*tgz -C ${CH_PKG_PATH} &&
-	tar -xjf ${DL_PATH}/u-boot*bz2 -C ${CH_PKG_PATH} &&
+	tar -xjf ${DL_PATH}/linux-*bz2 -C ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
+	tar -xzf ${DL_PATH}/edison-src*tgz -C ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
+	tar -xjf ${DL_PATH}/u-boot*bz2 -C ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
 	task_mark_complete $FUNCNAME
 }
 
-function do_debootstrap() {
+# Cache packages in debootstrap tarball
+function do_debootstrap_cache() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi	
-	if [ -d ${ROOT_PATH} ]; then
-		rm -rf $ROOT_PATH/* 2>/dev/null
+
+	if [ -e ${DEBOOTSTRAP_TARBALL} ]; then
+		echo "debootstrap tarball exists - skipping"
+		true
+		task_mark_complete $FUNCNAME
+	fi
+
+	if [ -d ${TARGET_ROOT_PATH} ]; then
+		rm -rf $TARGET_ROOT_PATH/* 2>/dev/null
 	else
-		mkdir -p $ROOT_PATH
+		mkdir -p $TARGET_ROOT_PATH
 	fi
 	
-	debootstrap --include="${TARGET_MIN_PKGS},${TARGET_BUILD_PKGS}" --arch ${ARCH} --variant=minbase ${DIST} ${ROOT_PATH} ${DPKG_SERVER}
+	debootstrap --include="${TARGET_MIN_PKGS},${TARGET_BUILD_PKGS}" --arch ${ARCH} --variant=minbase --make-tarball ${DEBOOTSTRAP_TARBALL} ${DIST} ${TARGET_ROOT_PATH} ${DPKG_SERVER}
 	if [ $? -ne 0 ]; then
 		echo "debootstrap error"
-		rm -rf ${ROOT_PATH}
+		rm -rf ${TARGET_ROOT_PATH}
 		false
 		task_mark_complete $FUNCNAME
 		return 1
 	fi
+	task_mark_complete $FUNCNAME
+}
+
+function do_target_debootstrap() {
+	if task_start $FUNCNAME; then
+		return 0
+	fi	
+	if [ -d ${TARGET_ROOT_PATH} ]; then
+		rm -rf ${TARGET_ROOT_PATH}/* 2>/dev/null
+	else
+		mkdir -p $TARGET_ROOT_PATH
+	fi
+	
+	debootstrap --include="${TARGET_MIN_PKGS},${TARGET_BUILD_PKGS}" --arch ${ARCH} --variant=minbase --unpack-tarball ${DEBOOTSTRAP_TARBALL} ${DIST} ${TARGET_ROOT_PATH} ${DPKG_SERVER}
+	if [ $? -ne 0 ]; then
+		echo "debootstrap error"
+		rm -rf ${TARGET_ROOT_PATH}
+		false
+		task_mark_complete $FUNCNAME
+		return 1
+	fi
+	# setup build dir
+	mkdir -p ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}
+	touch ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/target
+
 	# setup before chroot
-	echo "edbian.local" > ${ROOT_PATH}/etc/hostname &&
-	echo "127.0.0.1	localhost edbian edbian.local" > ${ROOT_PATH}/etc/hosts &&
-	echo -e "ttyMFD0\nttyMFD1\nttyMFD2" >> ${ROOT_PATH}/etc/securetty &&
-	sed -i -e "s/root:\*/root:/g" ${ROOT_PATH}/etc/shadow &&
-	echo -e "/dev/disk/by-partlabel/u-boot-env0 0x0000 0x10000 0x10000\n/dev/disk/by-partlabel/u-boot-env1 0x0000 0x10000 0x10000" > ${ROOT_PATH}/etc/fw_env.config
+	echo "edbian.local" > ${TARGET_ROOT_PATH}/etc/hostname &&
+	echo "127.0.0.1	localhost edbian edbian.local" > ${TARGET_ROOT_PATH}/etc/hosts &&
+	echo -e "ttyMFD0\nttyMFD1\nttyMFD2" >> ${TARGET_ROOT_PATH}/etc/securetty &&
+	sed -i -e "s/root:\*/root:/g" ${TARGET_ROOT_PATH}/etc/shadow &&
+	echo -e "/dev/disk/by-partlabel/u-boot-env0 0x0000 0x10000 0x10000\n/dev/disk/by-partlabel/u-boot-env1 0x0000 0x10000 0x10000" > ${TARGET_ROOT_PATH}/etc/fw_env.config
 	task_mark_complete $FUNCNAME
 }
 
 # after debootstrap, in chroot, before doing anything else
-function ch_do_debootstrap_post() {
+function ch_do_target_debootstrap_post() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
@@ -290,9 +318,9 @@ function ch_do_debootstrap_post() {
 	locale-gen en_US.UTF-8 &&
 	localepurge &&
 	# systemd optional mounts
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/fstab /etc/fstab &&
-	sed -i -e "s/default.target/local-fs.target/g" ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount &&
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount /lib/systemd/system &&
+	install -m 0644 ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/fstab /etc/fstab &&
+	sed -i -e "s/default.target/local-fs.target/g" ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount &&
+	install -m 0644 ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-core/base-files/base-files/*mount /lib/systemd/system &&
 	systemctl enable factory.mount &&
 	systemctl enable media-sdcard.mount &&
 	# enable the terminals we use
@@ -307,8 +335,8 @@ function ch_do_debootstrap_post() {
 	# copy skeleton wifi config
 	cp ${WIFI_CONFIG_SKELETON} /etc/network/interfaces.d/ &&
 	# enable USB gadget network device
-	sed -i -e "s/-@BASE_BINDIR@/\/bin/g" ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/otg/files/network-gadget-init.service &&
-	install -m 0644  ${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/otg/files/network-gadget-init.service /lib/systemd/system &&
+	sed -i -e "s/-@BASE_BINDIR@/\/bin/g" ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-core/otg/files/network-gadget-init.service &&
+	install -m 0644  ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-core/otg/files/network-gadget-init.service /lib/systemd/system &&
 	systemctl enable network-gadget-init.service &&
 	# set up root password
 	chpasswd <<<"root:${ROOTPWD}" &&
@@ -324,7 +352,7 @@ function ch_setup_first_install() {
 		return 0
 	fi
 	# systemd first-install setup
-	FIRST_INSTALL_PATH=${BASE}/edison-src/device-software/meta-edison-distro/recipes-core/first-install/files &&
+	FIRST_INSTALL_PATH=${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-core/first-install/files &&
 	install -m 0644 ${FIRST_INSTALL_PATH}/first-install.target /lib/systemd/system &&
 	install -m 0644 ${FIRST_INSTALL_PATH}/first-install.service /lib/systemd/system &&
 	install -m 0755 ${FIRST_INSTALL_PATH}/first-install.sh /sbin &&
@@ -349,10 +377,10 @@ function ch_setup_hostapd() {
 	fi
 	# note: Debian Jessie uses init.d for hostapd, and sources
 	# /etc/defaults/hostapd, which by default disables hostapd
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.conf-sane /etc/hostapd/hostapd.conf &&
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.conf /etc/hostapd/ &&
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.service /lib/systemd/system &&
-	install -m 0644 ${BASE}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.service /lib/systemd/system &&
+	install -m 0644 ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.conf-sane /etc/hostapd/hostapd.conf &&
+	install -m 0644 ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.conf /etc/hostapd/ &&
+	install -m 0644 ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/udhcpd-for-hostapd.service /lib/systemd/system &&
+	install -m 0644 ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-connectivity/hostapd/files/hostapd.service /lib/systemd/system &&
 	rm -f /etc/init.d/hostapd /etc/network/if-pre-up.d/hostapd /etc/network/if-pre-down.d/hostapd &&	
 	systemctl disable udhcpd.service
 	task_mark_complete $FUNCNAME
@@ -363,7 +391,7 @@ function ch_build_install_pwr_button_handler() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	pushd /usr/src/edison-src/device-software/meta-edison-distro/recipes-support/pwr-button-handler/files
+	pushd ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-support/pwr-button-handler/files
 	sed -i -e "s/\"\/usr\/bin\/configure_edison.*\"/\"\/bin\/systemctl start hostapd.service\"/g" pwr-button-handler.c &&
 	gcc -O2 -DNDEBUG -o pwr_button_handler pwr-button-handler.c &&
 	strip pwr_button_handler &&
@@ -376,15 +404,16 @@ function ch_build_install_pwr_button_handler() {
 }
 
 # note: sources are installed into DKMS cache, so the unpacked dir
-# is deleted at the end
+# is deleted at the end.  Also, dkms insists on using /usr/src.
+
 function ch_do_bcm_wifi() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	cp -av /usr/src/edison-src/broadcom_cws/wlan/driver_bcm43x \
-		/usr/src/driver_bcm43x-1.0
-	pushd /usr/src
-	DKMS_CONF=driver_bcm43x-1.0/dkms.conf
+	cp -av ${CH_BUILD_PATH}/edison-src/broadcom_cws/wlan/driver_bcm43x \
+		/usr/src/driver_bcm43x-1.0 &&
+	pushd /usr/src &&
+	DKMS_CONF=driver_bcm43x-1.0/dkms.conf &&
 	echo "MAKE=\"make KERNEL_SRC=\$kernel_source_dir\"" >$DKMS_CONF &&
 	echo "CLEAN=\"make clean\"" >> $DKMS_CONF &&
 	echo "BUILT_MODULE_NAME=bcm4334x" >> $DKMS_CONF &&
@@ -404,7 +433,7 @@ function ch_do_bcm_wifi_fw_install() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	pushd /usr/src/edison-src/broadcom_cws/wlan/firmware
+	pushd ${CH_BUILD_PATH}/edison-src/broadcom_cws/wlan/firmware
         install -v -d  /etc/firmware/ &&
         install -m 0755 bcmdhd_aob.cal_4334x_b0 /etc/firmware/bcmdhd_aob.cal &&
         install -m 0755 bcmdhd.cal_4334x_b0 /etc/firmware/bcmdhd.cal &&
@@ -419,7 +448,7 @@ function ch_do_bcm_bt_fw_install() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	pushd /usr/src/edison-src/broadcom_cws/bluetooth/firmware
+	pushd ${CH_BUILD_PATH}/edison-src/broadcom_cws/bluetooth/firmware
         gcc -O2 -o brcm_patchram_plus brcm_patchram_plus.c &&
 	install -v -d  /etc/firmware/ &&
         install -m 0755 BCM43341B0_002.001.014.0122.0166.hcd /etc/firmware/bcm43341.hcd &&
@@ -441,15 +470,15 @@ function ch_do_kernel() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi	
-	EDISRC_PATH=${BASE}/edison-src
+	EDISRC_PATH=${CH_BUILD_PATH}/edison-src
 	if [ ! -d ${EDISRC_PATH} ]; then
 		echo "edison source not found"
 		false
 		task_mark_complete $FUNCNAME
 		return 1
 	fi
-	pushd ${BASE}/linux-* &&\
-	EDIKERN_PATH=${EDISRC_PATH}/device-software/meta-edison/recipes-kernel/linux/files &&\
+	pushd ${CH_BUILD_PATH}/linux-* &&
+	EDIKERN_PATH=${EDISRC_PATH}/device-software/meta-edison/recipes-kernel/linux/files &&
 	patch -p1 < ${EDIKERN_PATH}/upstream_to_edison.patch &&
 	patch -p1 < ${PATCH_KERN_HSU_FILE} &&
 	sed -i -e "s/march=slm/march=silvermont/g" arch/x86/Make* &&
@@ -469,7 +498,7 @@ function ch_do_kernel_install() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi	
-	dpkg -i /usr/src/linux*deb
+	dpkg -i ${CH_BUILD_PATH}/linux*deb
 	task_mark_complete $FUNCNAME
 }
 
@@ -530,8 +559,8 @@ function ch_do_u-boot_build() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	pushd /usr/src/u-boot*
-	patch -p1 < /usr/src/edison-src/device-software/meta-edison-distro/recipes-bsp/u-boot/files/upstream_to_edison.patch &&
+	pushd ${CH_BUILD_PATH}/u-boot-* &&
+	patch -p1 < ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-bsp/u-boot/files/upstream_to_edison.patch &&
 	# hack to fix build error - take out irqinfo cmd
 	sed -i "/CONFIG_CMD_IRQ/d" include/configs/edison.h &&
 	make edison_config &&
@@ -544,7 +573,7 @@ function ch_do_u-boot_build() {
 	fi
 	# pad the beginning of u-boot.bin to start at ofs 0x1000 (4096b)
 	# and pad up to 4096 blocks
-	rm -f u-boot-edison.bin
+	rm -f u-boot-edison.bin &&
 	dd if=u-boot.bin of=u-boot-edison.bin ibs=4096 obs=4096 seek=1 conv=notrunc conv=sync
 	task_mark_complete $FUNCNAME
 	popd
@@ -556,7 +585,7 @@ function ch_do_u-boot-envs_build() {
 		return 0
 	fi
 	mkdir -p ${UBOOT_ENVS}
-	pushd /usr/src/edison-src/device-software/meta-edison-distro/recipes-bsp/u-boot/files
+	pushd ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-bsp/u-boot/files
 	sed -i -e "s/earlyprintk=ttyMFD2,keep/earlyprintk=hsu2/g" edison.env
 	sed -i -e "s/console=ttyMFD2/console=ttyMFD2,115200n8/g" edison.env
 	# hack, find a better place for this later
@@ -582,11 +611,11 @@ function do_build_local_mkimage() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	pushd ${ROOT_PATH}/usr/src/u-boot-[0-9]*
-	make distclean &&\
-	make edison_config &&\
-	make tools &&\
-	cp tools/mkimage ${BASE}	
+	pushd ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-[0-9]*
+	make distclean &&
+	make edison_config &&
+	make tools &&
+	cp tools/mkimage ${MKIMAGE}
 	task_mark_complete $FUNCNAME
 	popd
 }
@@ -605,7 +634,7 @@ function do_process_ota_script() {
 	for elem in $tab_size ; do IFS=':' read -a fld_elem <<< "$elem"; sed -i "s/${fld_elem[0]}/${fld_elem[1]}/g" ${FLASHER}/ota_update.cmd; done;
 
 	# Convert OTA script to u-boot script
-	${BASE}/mkimage -a 0x10000 -T script -C none -n 'Edison Updater script' -d ${FLASHER}/ota_update.cmd ${FLASHER}/ota_update.scr
+	${MKIMAGE} -a 0x10000 -T script -C none -n 'Edison Updater script' -d ${FLASHER}/ota_update.cmd ${FLASHER}/ota_update.scr
 
 	# Supress Preprocessed OTA script
 	rm -f ${FLASH}/ota_update.cmd
@@ -618,13 +647,13 @@ function do_build_flash() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	EDPATH=${ROOT_PATH}/usr/src/edison-src
+	EDPATH=${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/edison-src
 	mkdir -p ${FLASHER}
 	pushd ${FLASHER}
 	# Copy U-Boot
-	cp ${ROOT_PATH}/usr/src/u-boot-[0-9]*/u-boot-edison.bin .
+	cp ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-[0-9]*/u-boot-edison.bin .
 	# Copy U-Boot envs
-	cp -av ${ROOT_PATH}/usr/src/u-boot-envs .
+	cp -av ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-envs .
 	# Copy IFWI
 	cp ${EDPATH}/device-software/utils/flash/ifwi/edison/*.bin .
 	# Make DFU variants of IFWI images
@@ -659,7 +688,7 @@ function do_make_bootfs() {
 	dd if=/dev/zero of=${BOOTFS_FILE} bs=1M count=${BOOTFS_SIZE} &&\
 	mkdosfs ${BOOTFS_FILE} &&\
 	mount -o loop ${BOOTFS_FILE} ${TEMP_MNTPT} &&\
-	cp ${ROOT_PATH}/boot/vmlinuz* ${TEMP_MNTPT}/vmlinuz
+	cp ${TARGET_ROOT_PATH}/boot/vmlinuz* ${TEMP_MNTPT}/vmlinuz
 	task_mark_complete $FUNCNAME
 	umount ${TEMP_MNTPT}
 }
@@ -668,13 +697,13 @@ function do_prune_rootfs() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	rm -rf ${ROOT_PATH}/usr/src/u-boot*
-	rm -rf ${ROOT_PATH}/usr/src/linux-3.*[0-9]
-	rm -rf ${ROOT_PATH}/usr/src/linux-headers*edison
-	rm -rf ${ROOT_PATH}/usr/src/edison-src
-	rm ${ROOT_PATH}/usr/src/edbian.sh
-	rm ${ROOT_PATH}/usr/src/checkpoint*
-	rm ${ROOT_PATH}${PATCH_KERN_HSU_FILE}
+	rm -rf ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/u-boot*
+	rm -rf ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/linux-3.*[0-9]
+	rm -rf ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/linux-headers*edison
+	rm -rf ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/edison-src
+	rm ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/edbian.sh
+	rm ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/checkpoint*
+	rm ${TARGET_ROOT_PATH}${PATCH_KERN_HSU_FILE}
 	task_mark_complete $FUNCNAME
 }
 
@@ -688,18 +717,18 @@ function do_make_rootfs() {
 	dd if=/dev/zero of=${ROOTFS_FILE} bs=1M count=${ROOTFS_SIZE} &&\
 	mkfs.ext4 ${ROOTFS_FILE} &&\
 	mount -o loop ${ROOTFS_FILE} ${TEMP_MNTPT} &&\
-	cp -av ${ROOT_PATH}/* ${TEMP_MNTPT}/.
+	cp -av ${TARGET_ROOT_PATH}/* ${TEMP_MNTPT}/.
 	task_mark_complete $FUNCNAME
 	umount ${TEMP_MNTPT}
 }
 
 function cleanup_build_files() {
 	echo "Removing chroot directory"
-	rm -rf ${ROOT_PATH}
+	rm -rf ${TARGET_ROOT_PATH}
 	echo "Removing intermediate files"
 	rmdir ${TEMP_MNTPT}
 	rm -rf ${FLASHER}
-	rm -f mkimage
+	rm -f ${MKIMAGE}
 }
 
 function cleanup_build_products() {
@@ -758,11 +787,11 @@ if grep -q "debug" <<<"$1"; then
 	DEBUG=1
 fi
 
-if is_in_chroot; then
-	echo "---In chroot env"
-	BASE=/usr/src
-	rm /usr/src/fail
-	ch_do_debootstrap_post
+if is_in_target_chroot; then
+	echo "---In target chroot env"
+	CHECKPOINT=${CH_BUILD_PATH}
+	rm ${CH_BUILD_PATH}/fail
+	ch_do_target_debootstrap_post
 	ch_setup_first_install
 	ch_setup_hostapd
 	ch_build_install_pwr_button_handler
@@ -774,15 +803,24 @@ if is_in_chroot; then
 	ch_do_u-boot_build
 	ch_do_u-boot-envs_build
 	if [ $FAIL -ne 0 ]; then
-		touch /usr/src/fail
+		touch ${CH_BUILD_PATH}/fail
+	fi
+elif is_in_build_chroot; then
+	echo "---In build chroot env"
+	CHECKPOINT=${CH_BUILD_PATH}
+	rm ${CH_BUILD_PATH}/fail
+	if [ $FAIL -ne 0 ]; then
+		touch ${CH_BUILD_PATH}/fail
 	fi
 else
 	echo "---In native env"
+	CHECKPOINT=${BASE}
 	do_check_prereqs
 	do_download_stuff
-	do_debootstrap
-	do_unpack_stuff
-	do_chroot_tasks # all is_in_chroot done here
+	do_debootstrap_cache
+	do_target_debootstrap
+	do_unpack_stuff ${TARGET_ROOT_PATH}
+	do_chroot_tasks ${TARGET_ROOT_PATH} # all is_in_chroot done here
 	do_build_flash
 	do_build_local_mkimage
 	do_make_bootfs
