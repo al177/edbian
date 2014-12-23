@@ -47,7 +47,7 @@ ARCH=i386
 BASE=$PWD
 DL_PATH=${BASE}/dl
 TARGET_ROOT_PATH=${BASE}/debroot_target
-BUILD_ROOT_PATH=${BASE}/debroot_build
+BUILDER_ROOT_PATH=${BASE}/debroot_builder
 FLASHER=${BASE}/toFlash
 THIS_SCRIPT=`basename $0`
 
@@ -80,11 +80,11 @@ http://downloadmirror.intel.com/24389/eng/edison-src-rel1-maint-rel1-ww42-14.tgz
 https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.17.tar.bz2 \
 ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 
-# Packages to install on top of minbase
-TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate,wicd-curses"
+# Packages to install on top of minbase for the target rootfs
+TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate,wicd-curses,bluetooth"
 
 # Packages needed for building.  TODO: make toolchain-less build
-TARGET_BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper"
+BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper,libglib2.0-dev,python,libbluetooth-dev"
 
 # Check that these are available on the build host
 HOST_PKGS_REQUIRED="dosfstools zip"
@@ -96,13 +96,13 @@ function is_in_target_chroot() {
 	[ -e ${CH_BUILD_PATH}/target ]
 }
 
-function is_in_build_chroot() {
+function is_in_builder_chroot() {
 	[ -e ${CH_BUILD_PATH}/builder ]
 }
 
 # Patch to fix early printk in the Edison Yocto kernel patch
 PATCH_KERN_HSU_FILE=${CH_BUILD_PATH}/edison_early_printk_hsu.patch
-if is_in_target_chroot; then 
+if is_in_builder_chroot; then 
 cat > $PATCH_KERN_HSU_FILE <<'HeREPaTCH1'
 --- linux-3.10.17/arch/x86/platform/intel-mid/early_printk_intel_mid.c	2014-11-22 23:05:46.062552675 -0600
 +++ linux-new/arch/x86/platform/intel-mid/early_printk_intel_mid.c	2014-11-30 17:16:57.515386274 -0600
@@ -175,23 +175,33 @@ function task_mark_complete() {
 	fi
 }
 
-
+# do_chroot_tasks <type>
 function do_chroot_tasks() {
-	if task_start $FUNCNAME; then
+	FULL_FUNCNAME="${FUNCNAME}_$1"
+	if task_start $FULL_FUNCNAME; then
 		return 0
 	fi
-	THIS_ROOT_PATH=$1
+
+	if [ "$1" == "target" ]; then	
+		THIS_ROOT_PATH=${TARGET_ROOT_PATH}
+	elif [ "$1" == "builder" ]; then
+		THIS_ROOT_PATH=${BUILDER_ROOT_PATH}
+	else
+		echo "Invalid rootenv type"
+		exit 255
+	fi
+	
 	mkdir -p ${THIS_ROOT_PATH}/${CH_BUILD_PATH}
 	cp $0 ${THIS_ROOT_PATH}/${CH_BUILD_PATH}
 	if [ $? -ne 0 ]; then
 		false
-		task_mark_complete $FUNCNAME
+		task_mark_complete $FULL_FUNCNAME
 		return 1
 	fi
 
 	setarch i686 chroot ${THIS_ROOT_PATH} /bin/bash ${CH_BUILD_PATH}/${THIS_SCRIPT}
 	[ ! -e ${THIS_ROOT_PATH}/${CH_BUILD_PATH}/fail ]
-	task_mark_complete $FUNCNAME
+	task_mark_complete $FULL_FUNCNAME
 	rm ${THIS_ROOT_PATH}/${CH_BUILD_PATH}/${THIS_SCRIPT}
 }
 
@@ -231,13 +241,21 @@ function do_download_stuff() {
 	task_mark_complete $FUNCNAME
 }
 
-# do_unpack_stuff <path_to_debroot>
+# do_unpack_stuff <type>
 function do_unpack_stuff() {
-	if task_start $FUNCNAME; then
+	FULL_FUNCNAME="${FUNCNAME}_$1"
+	if task_start $FULL_FUNCNAME; then
 		return 0
 	fi
-	
-	THIS_ROOT_PATH=$1	
+
+	if [ "$1" == "target" ]; then	
+		THIS_ROOT_PATH=${TARGET_ROOT_PATH}
+	elif [ "$1" == "builder" ]; then
+		THIS_ROOT_PATH=${BUILDER_ROOT_PATH}
+	else
+		echo "Invalid rootenv type"
+		exit 255
+	fi
 
 	if ! grep -q debroot <<<"${THIS_ROOT_PATH}"; then
 		echo "Internal path error, bailing!"
@@ -246,7 +264,7 @@ function do_unpack_stuff() {
 	tar -xjf ${DL_PATH}/linux-*bz2 -C ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
 	tar -xzf ${DL_PATH}/edison-src*tgz -C ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
 	tar -xjf ${DL_PATH}/u-boot*bz2 -C ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
-	task_mark_complete $FUNCNAME
+	task_mark_complete $FULL_FUNCNAME
 }
 
 # Cache packages in debootstrap tarball
@@ -267,14 +285,56 @@ function do_debootstrap_cache() {
 		mkdir -p $TARGET_ROOT_PATH
 	fi
 	
-	debootstrap --include="${TARGET_MIN_PKGS},${TARGET_BUILD_PKGS}" --arch ${ARCH} --variant=minbase --make-tarball ${DEBOOTSTRAP_TARBALL} ${DIST} ${TARGET_ROOT_PATH} ${DPKG_SERVER}
+	debootstrap --include="${TARGET_MIN_PKGS},${BUILD_PKGS}" --arch ${ARCH} --variant=minbase --make-tarball ${DEBOOTSTRAP_TARBALL} ${DIST} ${TARGET_ROOT_PATH} ${DPKG_SERVER}
 	if [ $? -ne 0 ]; then
 		echo "debootstrap error"
-		rm -rf ${TARGET_ROOT_PATH}
+		if [ ${DEBUG} -eq 0 ]; then
+			rm -rf ${TARGET_ROOT_PATH}
+		fi
 		false
 		task_mark_complete $FUNCNAME
 		return 1
 	fi
+	task_mark_complete $FUNCNAME
+}
+
+function do_builder_debootstrap() {
+	if task_start $FUNCNAME; then
+		return 0
+	fi	
+	if [ -d ${BUILDER_ROOT_PATH} ]; then
+		rm -rf ${BUILDER_ROOT_PATH}/* 2>/dev/null
+	else
+		mkdir -p $BUILDER_ROOT_PATH
+	fi
+	
+	debootstrap --include="${BUILD_PKGS}" --arch ${ARCH} --variant=minbase --unpack-tarball ${DEBOOTSTRAP_TARBALL} ${DIST} ${BUILDER_ROOT_PATH} ${DPKG_SERVER}
+	if [ $? -ne 0 ]; then
+		echo "debootstrap error"
+		if [ ${DEBUG} -eq 0 ]; then
+			rm -rf ${BUILDER_ROOT_PATH}
+		fi
+		false
+		task_mark_complete $FUNCNAME
+		return 1
+	fi
+	# setup build dir
+	mkdir -p ${BUILDER_ROOT_PATH}/${CH_BUILD_PATH}
+	touch ${BUILDER_ROOT_PATH}/${CH_BUILD_PATH}/builder
+
+	# setup before chroot
+	echo "edbian.local" > ${BUILDER_ROOT_PATH}/etc/hostname &&
+	echo "127.0.0.1	localhost edbian edbian.local" > ${BUILDER_ROOT_PATH}/etc/hosts &&
+	sed -i -e "s/root:\*/root:/g" ${BUILDER_ROOT_PATH}/etc/shadow &&
+	task_mark_complete $FUNCNAME
+}
+
+function do_copy_builder_packages() {
+	if task_start $FUNCNAME; then
+		return 0
+	fi	
+	
+	cp ${BUILDER_ROOT_PATH}/${CH_BUILD_PATH}/*deb ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/.
 	task_mark_complete $FUNCNAME
 }
 
@@ -288,17 +348,19 @@ function do_target_debootstrap() {
 		mkdir -p $TARGET_ROOT_PATH
 	fi
 	
-	debootstrap --include="${TARGET_MIN_PKGS},${TARGET_BUILD_PKGS}" --arch ${ARCH} --variant=minbase --unpack-tarball ${DEBOOTSTRAP_TARBALL} ${DIST} ${TARGET_ROOT_PATH} ${DPKG_SERVER}
+	debootstrap --include="${TARGET_MIN_PKGS},${BUILD_PKGS}" --arch ${ARCH} --variant=minbase --unpack-tarball ${DEBOOTSTRAP_TARBALL} ${DIST} ${TARGET_ROOT_PATH} ${DPKG_SERVER}
 	if [ $? -ne 0 ]; then
 		echo "debootstrap error"
-		rm -rf ${TARGET_ROOT_PATH}
+		if [ ${DEBUG} -eq 0 ]; then
+			rm -rf ${TARGET_ROOT_PATH}
+		fi
 		false
 		task_mark_complete $FUNCNAME
 		return 1
 	fi
 	# setup build dir
-	mkdir -p ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}
-	touch ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/target
+	mkdir -p ${TARGET_ROOT_PATH}/${CH_BUILD_PATH} &&
+	touch ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/target &&
 
 	# setup before chroot
 	echo "edbian.local" > ${TARGET_ROOT_PATH}/etc/hostname &&
@@ -453,7 +515,14 @@ function ch_do_bcm_bt_fw_install() {
 	install -v -d  /etc/firmware/ &&
         install -m 0755 BCM43341B0_002.001.014.0122.0166.hcd /etc/firmware/bcm43341.hcd &&
         install -v -d  /usr/sbin/ &&
-        install -m 0755 brcm_patchram_plus /usr/sbin/
+        install -m 0755 brcm_patchram_plus /usr/sbin/ &&
+	popd &&
+	pushd ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-connectivity/bluetooth-rfkill-event/files &&
+        gcc -O2 -I/usr/include/glib-2.0 -I/usr/lib/i386-linux-gnu/glib-2.0/include -lglib-2.0 -o bluetooth_rfkill_event bluetooth_rfkill_event.c &&
+	install -m 755 bluetooth_rfkill_event /usr/sbin &&
+	install -m 644 bcm43341.conf /etc/firmware &&
+	install -m 644 bluetooth-rfkill-event.service /lib/systemd/system &&
+	systemctl enable bluetooth-rfkill-event.service
 	task_mark_complete $FUNCNAME
 	popd
 }
@@ -610,7 +679,7 @@ function do_build_local_mkimage() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	pushd ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-[0-9]*
+	pushd ${BUILDER_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-[0-9]*
 	make distclean &&
 	make edison_config &&
 	make tools &&
@@ -646,13 +715,13 @@ function do_build_flash() {
 	if task_start $FUNCNAME; then
 		return 0
 	fi
-	EDPATH=${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/edison-src
+	EDPATH=${BUILDER_ROOT_PATH}/${CH_BUILD_PATH}/edison-src
 	mkdir -p ${FLASHER}
 	pushd ${FLASHER}
 	# Copy U-Boot
-	cp ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-[0-9]*/u-boot-edison.bin .
+	cp ${BUILDER_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-[0-9]*/u-boot-edison.bin .
 	# Copy U-Boot envs
-	cp -av ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-envs .
+	cp -av ${BUILDER_ROOT_PATH}/${CH_BUILD_PATH}/u-boot-envs .
 	# Copy IFWI
 	cp ${EDPATH}/device-software/utils/flash/ifwi/edison/*.bin .
 	# Make DFU variants of IFWI images
@@ -700,9 +769,10 @@ function do_prune_rootfs() {
 	rm -rf ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/linux-3.*[0-9]
 	rm -rf ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/linux-headers*edison
 	rm -rf ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/edison-src
-	rm ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/edbian.sh
-	rm ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/checkpoint*
-	rm ${TARGET_ROOT_PATH}${PATCH_KERN_HSU_FILE}
+	rm -f ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/edbian.sh
+	rm -f ${TARGET_ROOT_PATH}/${CH_BUILD_PATH}/checkpoint*
+	rm -f ${TARGET_ROOT_PATH}${PATCH_KERN_HSU_FILE}
+	true # ok if any of the above commands fail
 	task_mark_complete $FUNCNAME
 }
 
@@ -722,8 +792,9 @@ function do_make_rootfs() {
 }
 
 function cleanup_build_files() {
-	echo "Removing chroot directory"
+	echo "Removing chroot directories"
 	rm -rf ${TARGET_ROOT_PATH}
+	rm -rf ${BUILDER_ROOT_PATH}
 	echo "Removing intermediate files"
 	rmdir ${TEMP_MNTPT}
 	rm -rf ${FLASHER}
@@ -794,20 +865,20 @@ if is_in_target_chroot; then
 	ch_setup_first_install
 	ch_setup_hostapd
 	ch_build_install_pwr_button_handler
-	ch_do_kernel
 	ch_do_kernel_install
 	ch_do_bcm_wifi
 	ch_do_bcm_wifi_fw_install
 	ch_do_bcm_bt_fw_install
-	ch_do_u-boot_build
-	ch_do_u-boot-envs_build
 	if [ $FAIL -ne 0 ]; then
 		touch ${CH_BUILD_PATH}/fail
 	fi
-elif is_in_build_chroot; then
+elif is_in_builder_chroot; then
 	echo "---In build chroot env"
 	CHECKPOINT=${CH_BUILD_PATH}
 	rm ${CH_BUILD_PATH}/fail
+	ch_do_kernel
+	ch_do_u-boot_build
+	ch_do_u-boot-envs_build
 	if [ $FAIL -ne 0 ]; then
 		touch ${CH_BUILD_PATH}/fail
 	fi
@@ -817,9 +888,13 @@ else
 	do_check_prereqs
 	do_download_stuff
 	do_debootstrap_cache
+	do_builder_debootstrap
+	do_unpack_stuff builder
+	do_chroot_tasks builder # all is_in_chroot done here
 	do_target_debootstrap
-	do_unpack_stuff ${TARGET_ROOT_PATH}
-	do_chroot_tasks ${TARGET_ROOT_PATH} # all is_in_chroot done here
+	do_copy_builder_packages
+	do_unpack_stuff target
+	do_chroot_tasks target # all is_in_chroot done here
 	do_build_flash
 	do_build_local_mkimage
 	do_make_bootfs
