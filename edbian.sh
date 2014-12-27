@@ -81,7 +81,7 @@ https://www.kernel.org/pub/linux/kernel/v3.x/linux-3.10.17.tar.bz2 \
 ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 
 # Packages to install on top of minbase for the target rootfs
-TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate,wicd-curses,bluetooth"
+TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate,wicd-curses,bluetooth,rfkill"
 
 # Packages needed for building.  TODO: make toolchain-less build
 BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper,libglib2.0-dev,python,libbluetooth-dev"
@@ -391,6 +391,8 @@ function ch_do_target_debootstrap_post() {
 	systemctl disable getty@tty1.service &&
 	# enable the USB multifunction gadget at boot time
 	echo "g_multi" >> /etc/modules &&
+	echo "bcm_bt_lpm" >> /etc/modules &&
+	echo "iio_trig_sysfs" >> /etc/modules &&
 	echo "options g_multi file=/dev/mmcblk0p9" > /etc/modprobe.d/g_multi.conf &&
 	# remove apt-catcher from sources.list if it exists
 	sed -i -e "s/localhost:3142\///g" /etc/apt/sources.list &&
@@ -520,7 +522,7 @@ function ch_do_bcm_bt_fw_install() {
 	pushd ${CH_BUILD_PATH}/edison-src/device-software/meta-edison-distro/recipes-connectivity/bluetooth-rfkill-event/files &&
         gcc -O2 -I/usr/include/glib-2.0 -I/usr/lib/i386-linux-gnu/glib-2.0/include -lglib-2.0 -o bluetooth_rfkill_event bluetooth_rfkill_event.c &&
 	install -m 755 bluetooth_rfkill_event /usr/sbin &&
-	install -m 644 bcm43341.conf /etc/firmware &&
+	install -m 755 bcm43341.conf /etc/firmware &&
 	install -m 644 bluetooth-rfkill-event.service /lib/systemd/system &&
 	systemctl enable bluetooth-rfkill-event.service
 	task_mark_complete $FUNCNAME
