@@ -859,49 +859,52 @@ if grep -q "debug" <<<"$1"; then
 	DEBUG=1
 fi
 
-if is_in_target_chroot; then
-	echo "---In target chroot env"
-	CHECKPOINT=${CH_BUILD_PATH}
-	rm ${CH_BUILD_PATH}/fail
-	ch_do_target_debootstrap_post
-	ch_setup_first_install
-	ch_setup_hostapd
-	ch_build_install_pwr_button_handler
-	ch_do_kernel_install
-	ch_do_bcm_wifi
-	ch_do_bcm_wifi_fw_install
-	ch_do_bcm_bt_fw_install
-	if [ $FAIL -ne 0 ]; then
-		touch ${CH_BUILD_PATH}/fail
+if ! grep -q "source" <<<"$1"; then
+
+	if is_in_target_chroot; then
+		echo "---In target chroot env"
+		CHECKPOINT=${CH_BUILD_PATH}
+		rm ${CH_BUILD_PATH}/fail
+		ch_do_target_debootstrap_post
+		ch_setup_first_install
+		ch_setup_hostapd
+		ch_build_install_pwr_button_handler
+		ch_do_kernel_install
+		ch_do_bcm_wifi
+		ch_do_bcm_wifi_fw_install
+		ch_do_bcm_bt_fw_install
+		if [ $FAIL -ne 0 ]; then
+			touch ${CH_BUILD_PATH}/fail
+		fi
+	elif is_in_builder_chroot; then
+		echo "---In build chroot env"
+		CHECKPOINT=${CH_BUILD_PATH}
+		rm ${CH_BUILD_PATH}/fail
+		ch_do_kernel
+		ch_do_u-boot_build
+		ch_do_u-boot-envs_build
+		if [ $FAIL -ne 0 ]; then
+			touch ${CH_BUILD_PATH}/fail
+		fi
+	else
+		echo "---In native env"
+		CHECKPOINT=${BASE}
+		do_check_prereqs
+		do_download_stuff
+		do_debootstrap_cache
+		do_builder_debootstrap
+		do_unpack_stuff builder
+		do_chroot_tasks builder # all is_in_chroot done here
+		do_target_debootstrap
+		do_copy_builder_packages
+		do_unpack_stuff target
+		do_chroot_tasks target # all is_in_chroot done here
+		do_build_flash
+		do_build_local_mkimage
+		do_make_bootfs
+		do_prune_rootfs
+		do_make_rootfs
+		do_process_ota_script
+		do_post_cleanup
 	fi
-elif is_in_builder_chroot; then
-	echo "---In build chroot env"
-	CHECKPOINT=${CH_BUILD_PATH}
-	rm ${CH_BUILD_PATH}/fail
-	ch_do_kernel
-	ch_do_u-boot_build
-	ch_do_u-boot-envs_build
-	if [ $FAIL -ne 0 ]; then
-		touch ${CH_BUILD_PATH}/fail
-	fi
-else
-	echo "---In native env"
-	CHECKPOINT=${BASE}
-	do_check_prereqs
-	do_download_stuff
-	do_debootstrap_cache
-	do_builder_debootstrap
-	do_unpack_stuff builder
-	do_chroot_tasks builder # all is_in_chroot done here
-	do_target_debootstrap
-	do_copy_builder_packages
-	do_unpack_stuff target
-	do_chroot_tasks target # all is_in_chroot done here
-	do_build_flash
-	do_build_local_mkimage
-	do_make_bootfs
-	do_prune_rootfs
-	do_make_rootfs
-	do_process_ota_script
-	do_post_cleanup
 fi

@@ -1,0 +1,4 @@
+#!/bin/sh
+
+update-rc.d hostapd disable
+systemctl disable udhcpd.service
