@@ -860,7 +860,6 @@ if grep -q "debug" <<<"$1"; then
 fi
 
 if ! grep -q "source" <<<"$1"; then
-
 	if is_in_target_chroot; then
 		echo "---In target chroot env"
 		CHECKPOINT=${CH_BUILD_PATH}
@@ -894,17 +893,21 @@ if ! grep -q "source" <<<"$1"; then
 		do_debootstrap_cache
 		do_builder_debootstrap
 		do_unpack_stuff builder
-		do_chroot_tasks builder # all is_in_chroot done here
-		do_target_debootstrap
-		do_copy_builder_packages
-		do_unpack_stuff target
-		do_chroot_tasks target # all is_in_chroot done here
-		do_build_flash
-		do_build_local_mkimage
-		do_make_bootfs
-		do_prune_rootfs
-		do_make_rootfs
-		do_process_ota_script
-		do_post_cleanup
+		if grep -q "chr" <<<"$1"; then
+			setarch i686 chroot ${BUILDER_ROOT_PATH} /bin/bash
+		else	
+			do_chroot_tasks builder # all is_in_chroot done here
+			do_target_debootstrap
+			do_copy_builder_packages
+			do_unpack_stuff target
+			do_chroot_tasks target # all is_in_chroot done here
+			do_build_flash
+			do_build_local_mkimage
+			do_make_bootfs
+			do_prune_rootfs
+			do_make_rootfs
+			do_process_ota_script
+			do_post_cleanup
+		fi
 	fi
 fi
