@@ -1,0 +1,22 @@
+diff -Naur files/pwr-button-handler.c files2/pwr-button-handler.c
+--- files/pwr-button-handler.c	2014-10-14 12:57:18.000000000 +0000
++++ files2/pwr-button-handler.c	2015-01-07 20:53:09.183514773 +0000
+@@ -46,7 +46,7 @@
+ /* We use 2 seconds for now */
+ #define EDISON_OOBE_PRESS_TIMEOUT 2
+ 
+-#define CALLED_COMMAND_ON_TIMEOUT "/usr/bin/configure_edison --enableOneTimeSetup"
++#define CALLED_COMMAND_ON_TIMEOUT "/bin/systemctl start hostapd.service"
+ 
+ struct input_event {
+     struct timeval time;
+diff -Naur files/pwr-button-handler.service files2/pwr-button-handler.service
+--- files/pwr-button-handler.service	2014-10-14 12:57:18.000000000 +0000
++++ files2/pwr-button-handler.service	2015-01-07 20:53:27.879514764 +0000
+@@ -6,5 +6,5 @@
+ Restart=on-failure
+ 
+ [Install]
+-WantedBy=default.target
++WantedBy=multi-user.target
+ 

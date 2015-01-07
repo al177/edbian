@@ -1,0 +1,7 @@
+#!/bin/bash
+
+EDSRC_FILES="${EDSRC_BASE}/device-software/meta-edison-distro/recipes-support/pwr-button-handler/files"
+
+cp -a ${EDSRC_FILES} ${PKG_NAME}
+
+build_src_pkg 
