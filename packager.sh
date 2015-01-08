@@ -13,22 +13,15 @@ EDSRC_BASE=${PWD}/edison-src
 PKG_SKEL_DIR=${PWD}/pkgs
 DEBS_DIR=${PWD}/debs
 
-function build_basic_pkg() {
-	echo "in build_basic_pkg"
-	echo "pkgname = $PKG_NAME"
-	cp -a DEBIAN ${PKG_NAME}
-	sed -i -e "s/##VERSION##/${EDSRC_VER}/g" ${PKG_NAME}/DEBIAN/control
-	fakeroot dpkg-deb --build ${PKG_NAME}
-}
-
 # build_src_pkg_start
 function build_src_pkg() {
 	echo "in build_src_pkg"
 	echo "pkgname = $PKG_NAME"
 	pushd $PKG_NAME
-	dh_make -y --createorig -p ${PKG_NAME} -s
 	export QUILT_PATCHES=debian/patches
 	export QUILT_REFRESH_ARGS="-p ab --no-timestamps --no-index"
+	export LANG=C
+	dh_make -y --createorig -p ${PKG_NAME} -s
 	mkdir ${PKG_NAME}/${QUILT_PATCHES}
 	if [ -e ../patches ]; then
 		for PATCH in `ls -1 ../patches`; do
@@ -49,14 +42,14 @@ function build_src_pkg() {
 	popd
 }
 
-
-pushd $PKG_SKEL_DIR
+mkdir -p ${DEBS_DIR}
+pushd ${PKG_SKEL_DIR}
 for CUR_PKG in *; do
 	PKG_NAME="${CUR_PKG}_${EDSRC_VER}"
-	pushd $CUR_PKG
+	pushd ${CUR_PKG}
 	. ./make_pkg
-	mv *deb ${DEBS_DIR}
 	rm -rf ${PKG_NAME}
+	mv ${PKG_NAME}* ${DEBS_DIR}
 	popd
 done
 popd

@@ -191,8 +191,6 @@ function do_chroot_tasks() {
 		exit 255
 	fi
 	
-	mkdir -p ${THIS_ROOT_PATH}/${CH_BUILD_PATH}
-	cp $0 ${THIS_ROOT_PATH}/${CH_BUILD_PATH}
 	if [ $? -ne 0 ]; then
 		false
 		task_mark_complete $FULL_FUNCNAME
@@ -266,6 +264,30 @@ function do_unpack_stuff() {
 	tar -xjf ${DL_PATH}/u-boot*bz2 -C ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
 	task_mark_complete $FULL_FUNCNAME
 }
+
+# do_setup_chroot_buildpaths <type>
+function do_setup_chroot_buildpaths() {
+	FULL_FUNCNAME="${FUNCNAME}_$1"
+	if task_start $FULL_FUNCNAME; then
+		return 0
+	fi
+
+	if [ "$1" == "target" ]; then
+		THIS_ROOT_PATH=${TARGET_ROOT_PATH}
+	elif [ "$1" == "builder" ]; then
+		THIS_ROOT_PATH=${BUILDER_ROOT_PATH}
+	else
+		echo "Invalid rootenv type"
+		exit 255
+	fi
+
+	mkdir -p ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
+	cp $0 ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
+	cp packager.sh ${THIS_ROOT_PATH}/${CH_BUILD_PATH} &&
+	cp -a pkgs ${THIS_ROOT_PATH}/${CH_BUILD_PATH}
+	task_mark_complete $FULL_FUNCNAME
+}
+
 
 # Cache packages in debootstrap tarball
 function do_debootstrap_cache() {
@@ -893,6 +915,7 @@ if ! grep -q "source" <<<"$1"; then
 		do_debootstrap_cache
 		do_builder_debootstrap
 		do_unpack_stuff builder
+		do_setup_chroot_buildpaths builder
 		if grep -q "chr" <<<"$1"; then
 			setarch i686 chroot ${BUILDER_ROOT_PATH} /bin/bash
 		else	

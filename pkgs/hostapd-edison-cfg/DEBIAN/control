@@ -1,7 +1,0 @@
-Package: hostapd-setup
-Architecture: all
-Maintainer: Andrew Litt
-Depends: hostapd
-Priority: optional
-Version: 2014.42
-Description: Config files for eDbian hostapd

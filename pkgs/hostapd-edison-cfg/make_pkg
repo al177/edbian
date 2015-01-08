@@ -1,20 +1,5 @@
 #!/bin/bash
-
 EDSRC_FILES="${EDSRC_BASE}/device-software/meta-edison-distro/recipes-connectivity/hostapd/files"
 
-INST=${PWD}/${PKG_NAME}
-if [ -e $INST ]; then
-	rm -rf ${INST}/*
-else
-	mkdir $INST
-fi
-
-echo "install-to ${INST}"
-install -v -d ${INST}/etc/hostapd
-install -m 0644 ${EDSRC_FILES}/hostapd.conf-sane ${INST}/etc/hostapd/hostapd.conf
-install -m 0644 ${EDSRC_FILES}/udhcpd-for-hostapd.conf ${INST}/etc/hostapd
-install -v -d ${INST}/lib/systemd/system
-install -m 0644 ${EDSRC_FILES}/udhcpd-for-hostapd.service ${INST}/lib/systemd/system
-install -m 0644 ${EDSRC_FILES}/hostapd.service ${INST}/lib/systemd/system
-
-build_basic_pkg
+cp -a ${EDSRC_FILES} ${PKG_NAME}
+build_src_pkg
