@@ -84,7 +84,7 @@ ftp://ftp.denx.de/pub/u-boot/u-boot-2014.04.tar.bz2"
 TARGET_MIN_PKGS="u-boot-tools,dosfstools,wpasupplicant,wireless-tools,hostapd,udhcpd,netbase,ifupdown,net-tools,isc-dhcp-client,localepurge,vim-tiny,nano,dbus,openssh-server,openssh-client,wget,ntpdate,wicd-curses,bluetooth,rfkill"
 
 # Packages needed for building.  TODO: make toolchain-less build
-BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper,libglib2.0-dev,python,libbluetooth-dev,dh-make,quilt,vim-tiny"
+BUILD_PKGS="build-essential,bc,dkms,fakeroot,debhelper,libglib2.0-dev,python,libbluetooth-dev,dh-make,quilt,vim-tiny,dh-systemd"
 
 # Check that these are available on the build host
 HOST_PKGS_REQUIRED="dosfstools zip"

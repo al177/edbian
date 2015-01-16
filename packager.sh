@@ -22,22 +22,28 @@ function build_src_pkg() {
 	export QUILT_REFRESH_ARGS="-p ab --no-timestamps --no-index"
 	export LANG=C
 	dh_make -y --createorig -p ${PKG_NAME} -s
-	mkdir ${PKG_NAME}/${QUILT_PATCHES}
+	mkdir -p ${PKG_NAME}/${QUILT_PATCHES}
 	if [ -e ../patches ]; then
 		for PATCH in `ls -1 ../patches`; do
 			quilt import ../patches/$PATCH
 		done
-		quilt import ${QUILT_PATCHES}
 	fi
 	if [ -e ../files ]; then
 		quilt new addfiles-${PKG_NAME}.patch
-		for FILE in `ls -1 ../files`; do
-			quilt add ../files/$FILE
+		# prime quilt with the new files
+		NEWFILES=`find ../files -type f  | sed -e "s/\.\.\/files\///g"`
+		for FILE in ${NEWFILES}; do
+			quilt add $FILE
 		done
+		# now that quilt expects the files, copy them
+		cp -a ../files/. .
+		# sync the patch and remove it
 		quilt refresh
-		quilt header -e <<<"add files "
+		quilt pop -a
+		# TODO: figure out how to automate patch header generation
+		#quilt header -e <<<"add files " 
 	fi
-	quilt pop -a
+	quilt push -a
 	dpkg-buildpackage -us -uc
 	popd
 }
