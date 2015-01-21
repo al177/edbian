@@ -10,4 +10,3 @@ install:
 	install -v -d /lib/systemd/system
 	install -m 0644 udhcpd-for-hostapd.service /lib/systemd/system
 	install -m 0644 hostapd.service /lib/systemd/system
-	systemctl enable pwr-button-handler.service

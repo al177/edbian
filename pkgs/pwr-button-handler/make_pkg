@@ -2,6 +2,28 @@
 
 EDSRC_FILES="${EDSRC_BASE}/device-software/meta-edison-distro/recipes-support/pwr-button-handler/files"
 
-cp -a ${EDSRC_FILES} ${PKG_NAME}
+# Prepare the source in ${PKG_NAME} before dh_make.  In most cases this is only
+# copying from $EDSRC_FILES to ${PKG_NAME}.  build_prep must create the
+# directory ${PKG_NAME}, either by side effect or directly.
+#
+# build_prep is called from the same path as this make_pkg.
+function build_prep() {
+	echo "build_prep"
+	cp -a ${EDSRC_FILES} ${PKG_NAME}
+}
 
-build_src_pkg 
+# Make final changes to the debian/ package configuration files before building.
+# quilt is used to track changes to the upstream source made by adding files
+# from files/ and patches from patches/, but package specific changes must be
+# done outside of quilt.
+#
+# This should set up build dependencies and description in debian/control,
+# customization to debian/rules, and license setup
+function build_fixup() {
+	echo "build_fixup"
+
+	cp ../copyright debian/copyright
+	sed -i -e "s/dh \$@/dh \$@ --with=systemd/g" debian/rules
+	sed -i -e "s/Description.*$/Description: edison power button handler/g" debian/control
+	sed -i -e "s/ <insert long.*$/ Fill me in later/g" debian/control
+}

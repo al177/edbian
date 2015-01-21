@@ -13,10 +13,19 @@ EDSRC_BASE=${PWD}/edison-src
 PKG_SKEL_DIR=${PWD}/pkgs
 DEBS_DIR=${PWD}/debs
 
-# build_src_pkg_start
 function build_src_pkg() {
-	echo "in build_src_pkg"
+	PKG_NAME=$1
 	echo "pkgname = $PKG_NAME"
+
+	# delete function remnants from previous iteration
+	unset -f build_prep
+	unset -f build_fixup
+
+	# source package build file
+	. ./make_pkg
+	if type -t build_prep > /dev/null; then
+		build_prep
+	fi
 	pushd $PKG_NAME
 	export QUILT_PATCHES=debian/patches
 	export QUILT_REFRESH_ARGS="-p ab --no-timestamps --no-index"
@@ -40,22 +49,36 @@ function build_src_pkg() {
 		# sync the patch and remove it
 		quilt refresh
 		quilt pop -a
-		# TODO: figure out how to automate patch header generation
-		#quilt header -e <<<"add files " 
 	fi
 	quilt push -a
+	if [ -e ../debian_patches ]; then
+		for PATCH in `ls -1 ../debian_patches`; do
+			patch -p1 < ../debian_patches/$PATCH
+		done
+	fi
+
+	# run post unpack and patch fixup.  this is where debian/ customization
+	# should happen
+	if type -t build_fixup > /dev/null; then
+		build_fixup
+	fi
 	dpkg-buildpackage -us -uc
 	popd
 }
 
 mkdir -p ${DEBS_DIR}
 pushd ${PKG_SKEL_DIR}
-for CUR_PKG in *; do
+if [ -n "$1" ]; then
+	PKGS="$1"
+else
+	PKGS="`ls -1`"
+fi
+for CUR_PKG in ${PKGS}; do
 	PKG_NAME="${CUR_PKG}_${EDSRC_VER}"
+	rm ${DEBS_DIR}/${CUR_PKG}*
 	pushd ${CUR_PKG}
-	. ./make_pkg
-	rm -rf ${PKG_NAME}
-	mv ${PKG_NAME}* ${DEBS_DIR}
+	build_src_pkg ${PKG_NAME}
+	mv ${PKG_NAME}?* ${DEBS_DIR}
 	popd
 done
 popd
